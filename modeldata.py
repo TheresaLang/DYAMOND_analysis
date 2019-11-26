@@ -29,7 +29,9 @@ class Modeldata:
                 global_fields[var]
             )
                 
+        self.global_means = None
         self.zonal_means = None
+        self.global_mean_profiles = None
         self.tropical_mean_profiles = None
     
     def add_global_field(self, field, variable):
@@ -51,6 +53,25 @@ class Modeldata:
         """ Return global fields of modeldata object (as VariableField objects).
         """
         return self.global_fields
+    
+    def calc_global_means(self):
+        """ Calculate global means of global fields.
+        """
+        
+        global_means = dict.fromkeys(self.variables)
+        
+        for var in self.variables:
+            global_means[var] = self.global_fields[var].calc_average('longitude').calc_average('latitude').calc_average('height')
+        
+        self.global_means = global_means
+        
+    def get_global_means(self):
+        """ Returns global means of global fields (as VariableField objects)
+        """
+        if self.global_means is None:
+            self.calc_global_means()
+        
+        return self.global_means
         
     def calc_zonal_means(self):
         """ Calculate zonal means of global fields.
@@ -71,6 +92,26 @@ class Modeldata:
         
         return self.zonal_means
     
+    def calc_global_mean_profiles(self):
+        """ Calculate global mean profiles of global fields.
+        """
+        global_mean_profiles = dict.fromkeys(self.variables)
+        zonal_means = self.get_zonal_means()
+        
+        for var in self.variables:
+            global_mean_profiles[var] = zonal_means[var].calc_average('latitude')
+            
+        self.global_mean_profiles = global_mean_profiles
+        
+    def get_global_mean_profiles(self):
+        """ Return global mean profiles of global fields (as VariableFields objects).
+        """
+        if self.global_mean_profiles is None:
+            self.calc_global_mean_profiles()
+        
+        return self.global_mean_profiles
+        
+            
     def calc_tropical_mean_profiles(self):
         """ Calculate mean tropical profiles of global fields.
         """
@@ -89,7 +130,19 @@ class Modeldata:
             self.calc_tropical_mean_profiles()
         
         return self.tropical_mean_profiles
-        
+    
+#    def calc_weighted_vertical_average(self):
+#        """
+#        """
+#        weighted_averages = dict.fromkeys(self.variables)
+#        for var in self.variables:
+#            #subfield = self.global_fields[var].select_subfield('height', bnds, expand=True)
+#            layer_thickness = np.diff(self.dimensionvars['height'][:-1] + 0.5 * np.diff(self.dimensionvars['height']))
+#            layer_thickness = np.expand_dims(np.expand_dims(layer_thickness, 1), 2)
+#            #subfield = self.global_fields[var].select_subfield('height', bnds, expand=False)
+#            field_averaged = subfield.calc_weighted_average('height', layer_thickness)
+#            weighted_averages[var] = field_averaged
+#        return weighted_averages
         
 class VariableField:
     """ Instances of VariableField contain data fields of one variable and
@@ -127,12 +180,46 @@ class VariableField:
         )
         return average
     
-    def select_subfield(self, dimension, bounds):
+    def calc_weighted_average(self, dimension, weights=None):
+        """
+        """
+        average_axis = self.dimensions.index(dimension)
+        dimensions_average = self.get_reduced_dimensions([dimension])
+        dimensionvars_average = self.get_reduced_dimensionvars([dimension])
+        
+        # if weights are not given, calculate them based on the dimension variables
+        dim_numbers = np.arange(len(self.dimensions))
+        other_dims = dim_numbers[dim_numbers != average_axis] 
+        if weights is None:
+            weights = np.diff(self.dimensionvars[dimension][:-1] + 0.5 * np.diff(self.dimensionvars[dimension]))
+            #FIXME: does this also work if dimension is not 'height'?
+        
+        weights = np.expand_dims(np.expand_dims(weights, other_dims[0]), other_dims[1])
+        
+        if self.data.shape[average_axis] == weights.shape[average_axis] + 2:
+            weighted_average = np.sum(np.multiply(self.data[1:-1], weights), axis=0) / np.sum(weights)
+        elif self.data.shape[average_axis] == weights.shape[average_axis]:
+            weighted_average = np.nansum(np.multiply(self.data, weights), axis=0) / np.sum(weights)
+        else:
+            print('Shape of weights does not fit shape of data.')
+
+        
+        average = VariableField(
+            dimensions_average,
+            dimensionvars_average,
+            weighted_average
+            #np.squeeze(np.nanmean(self.data, axis=average_axis))
+        )
+        return average
+        
+    
+    def select_subfield(self, dimension, bounds, expand=False):
         """ Select a subfield along a given dimension.
         
         Parameters:
             dimension (str): Name of dimension from which to take a subset (e.g. 'latitude')
             bnds (list): Lower and upper boundary for selection (e.g. [-30, 30])
+            expand (bool): If true, additional levels are selected below and above 
             
         Returns:
             VariableField: Selected subfield
@@ -144,10 +231,18 @@ class VariableField:
                 self.dimensionvars[dimension] <= bounds[1]
             )
         )[0]
-
+        
+        if expand:
+            start_ind = selection_ind[0]
+            end_ind = selection_ind[-1]
+            selection_ind = np.insert(selection_ind, 0, start_ind - 1)
+            selection_ind = np.append(selection_ind, end_ind + 1)
+        
+        dimensionvars_subfield = self.dimensionvars.copy()
+        dimensionvars_subfield[dimension] = self.dimensionvars[dimension][selection_ind]
         subfield = VariableField(
             self.dimensions,
-            self.dimensionvars,
+            dimensionvars_subfield,
             np.take(self.data, selection_ind, selection_axis)
         )
         
