@@ -1,3 +1,6 @@
 __pycache__
 *.nc
+*.ipynb
 .ipynb_checkpoints
+Plots*
+Untitled*
