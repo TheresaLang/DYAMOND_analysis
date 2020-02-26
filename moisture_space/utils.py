@@ -29,6 +29,20 @@ def get_quantity_at_level(field, height, level):
     
     return target_value
 
+def get_quantity_at_half_levels(field):
+    """ Returns field at height levels marking the middle between 
+    former height levels.
+    
+    Parameters:
+        field (2darray): variable field with dimensions (zlevs, x)
+
+    Returns:
+        2darray, dimensions (zhalflevs, x): field at half levels
+    """
+    field_at_half_levels = field[:-1] + 0.5 * np.diff(field)
+    
+    return field_at_half_levels
+
 def get_height_array(height, shape):
     """ Create an ndarray of heights from a 1darray.
     
@@ -56,7 +70,7 @@ def calc_vertical_mean(field, height):
         height (1darray): height field with dimension (levs) 
         
     Returns:
-        2darray, dimensions (levs, x): vertical mean of field
+        2darray, dimensions (x): vertical mean of field
     """
     
     layer_depth = np.diff(height)
@@ -206,7 +220,7 @@ def calc_IWV(specific_humidity, temperature, pressure, height):
     # calculate vmr
     vmr = typhon.physics.specific_humidity2vmr(specific_humidity)
     # calculate water vapor density
-    rho = typhon.physics.thermodynamics.density(pressure, temperature, R=R_v)  
+    rho = typhon.physics.thermodynamics.density(pressure, temperature, R=R_v) 
     rho[np.where(np.isnan(rho))] = 0.
     vmr[np.where(np.isnan(vmr))] = 0.
     # if surface corresponds to first entry of array, the arrays have to be flipped
@@ -286,3 +300,104 @@ def spec_hum2rel_hum(specific_humidity, temperature, pressure, phase='mixed'):
     rh = vmr * pressure / e_eq
     
     return rh
+
+def interpolate_vertically(field, height, target_height):
+    """ Interpolate a filed to a new height vector. 
+        
+    Parameters:
+        field (2darray): variable field with dimensions (levs, x)
+        height (1darray): height field with dimension (levs)
+        target_height (1darray): new height field with dimensions (levs_new)
+        
+    Returns:
+        2darray, dimensions (levs_new, x): vertical mean of field
+    """
+    
+    num_profiles = field.shape[1]
+    field_interp = np.ones((target_height.shape[0], field.shape[1])) * np.nan
+    
+    for p in range(num_profiles):
+        field_interp[:, p] = interp1d(height, field[:, p], fill_value='extrapolate', bounds_error=False)(target_height)
+    
+    return field_interp
+
+
+def tropopause_height(temperature, height, min_height=6e3, max_height=20e3):
+    """ Calculate tropopause height according to WMO definition: 
+    The lowest level at which the lapse rate decreases to 2 C/km or less, 
+    provided that the average lapse rate between this level and all higher 
+    levels within 2 km does not exceed 2 C/km."
+    
+    Parameters:
+        temperature (2darray): Temperature [K] with dimensions (levs, x)
+        height (1darray): Height [m] with dimension (levs)
+        min_height (numeric): Lowest possible tropopause height [m], default: 6000
+        max_height (numeric): Highest possible tropopause height [m], default: 20000
+        
+    Returns:
+        1darray, dimension (x): Tropopause height [m]
+    """
+    if len(temperature.shape) > 1:
+        num_profiles = temperature.shape[1]
+    else:
+        num_profiles = 1
+    if height[0] > height[-1]:
+        height = np.flip(height, axis=0)
+        temperature = np.flip(temperature, axis=0)
+    
+    # height at half levels
+    height_half = get_quantity_at_half_levels(height)
+    # indices of heights between min_height and max_height
+    ind_pos_height = np.logical_and(height_half > min_height, height_half < max_height)
+    
+    tropo_height = np.ones(num_profiles) * np.nan    
+    for p in range(num_profiles):
+        # lapse rate
+        lapse_rate = - np.diff(temperature[:, p]) / np.diff(height)
+        # possible tropopause heights (heights where lapse rate < 2K/km)
+        pos_tropo_ind = np.where(lapse_rate[ind_pos_height] <= 2e-3)[0]
+        # Check whether the mean lapse rate in a 2km-layer above is also < 2K/km
+        # If not, go to next possible tropopause height
+        for k in range(len(pos_tropo_ind)):
+            th = height_half[ind_pos_height][pos_tropo_ind[k]]
+            ind_layer_above = np.where(np.logical_and(height_half >= th, height_half <= th + 2e3))
+            mean_lr_above = calc_vertical_mean(np.expand_dims(lapse_rate[ind_layer_above], 1), height_half[ind_layer_above])
+            if mean_lr_above <= 2e-3:
+                tropo_height[p] = th
+                break
+               
+    return tropo_height
+
+def rh_peak_height(relative_humidity, height, min_height=6e3, max_height=20e3):
+    """ Returns the height at which the relative humidity is at its maximum (between min_height
+    and max_height).
+    
+    Parameters:
+        relative_humidity (2darray): Relative humidity [-] with dimensions (levs, x)
+        height (1darray): Height [m] with dimension (levs)
+        min_height (numeric): Lowest possible tropopause height [m], default: 6000
+        max_height (numeric): Highest possible tropopause height [m], default: 20000
+    
+    Returns:
+        1darray, dimension (x): Height of maximum RH [m]
+    """
+    num_profiles = relative_humidity.shape[1]
+    if height[0] > height[-1]:
+        height = np.flip(height, axis=0)
+        relative_humidity = np.flip(relative_humidity, axis=0)
+        
+    rh_peak_height = np.ones(num_profiles) * np.nan 
+    rh_at_peak = np.ones(num_profiles) * np.nan 
+    # indices of heights between min_height and max_height
+    ind_pos_height = np.logical_and(height > min_height, height < max_height)
+    height = height[ind_pos_height]
+    relative_humidity = relative_humidity[ind_pos_height]
+    
+    for p in range(num_profiles):
+        rh_peak_height[p] = height[np.argmax(relative_humidity[:, p])]
+        print(np.argmax(relative_humidity[:, p]))
+        rh_at_peak[p] = np.max(relative_humidity[:, p])
+    
+    return rh_peak_height, rh_at_peak
+    
+    
