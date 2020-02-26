@@ -67,16 +67,17 @@ def read_var(infile, model, varname, specific_names=False):
         float or ndarray: Data array with variable
     """
     with Dataset(infile) as ds:
-        if not specific_names:
-            var = ds.variables[varname][:].filled(np.nan)
-        else:
-            if model == 'SAM' and varname == 'PRES':
-                pres_mean = ds.variables['p'][:].filled(np.nan)
-                pres_pert = ds.variables['PP'][:].filled(np.nan)
-                var = np.zeros((pres_pert.shape[1], pres_pert.shape[2], pres_pert.shape[3]))
+        if model == 'SAM' and varname == 'PRES':
+            pres_mean = ds.variables['p'][:].filled(np.nan)
+            pres_pert = ds.variables['PP'][:].filled(np.nan)
+            var = np.zeros((pres_pert.shape))
+            for k in range(pres_pert.shape[0]):
                 for i in range(pres_pert.shape[2]):
                     for j in range(pres_pert.shape[3]):
-                        var[:, i, j] = pres_mean * 1e2 + pres_pert[0, :, i, j]
+                        var[k, :, i, j] = pres_mean * 1e2 + pres_pert[k, :, i, j]
+        else:
+            if not specific_names:
+                var = ds.variables[varname][:].filled(np.nan)
             else:
                 model_varname = processing_tools.get_modelspecific_varnames(model)[varname]
                 var = ds.variables[model_varname][:].filled(np.nan)
@@ -100,16 +101,16 @@ def read_var_timestep(infile, model, varname, timestep, specific_names=False):
         float or ndarray: Data array with variable
     """
     with Dataset(infile) as ds:
-        if not specific_names:
-            var = ds.variables[varname][timestep].filled(np.nan)
+        if model == 'SAM' and varname == 'PRES':
+            pres_mean = ds.variables['p'][:].filled(np.nan)
+            pres_pert = ds.variables['PP'][timestep].filled(np.nan)
+            var = np.zeros((pres_pert.shape[0], pres_pert.shape[1], pres_pert.shape[2]))
+            for i in range(pres_pert.shape[1]):
+                for j in range(pres_pert.shape[2]):
+                    var[:, i, j] = pres_mean * 1e2 + pres_pert[:, i, j]
         else:
-            if model == 'SAM' and varname == 'PRES':
-                pres_mean = ds.variables['p'][timestep].filled(np.nan)
-                pres_pert = ds.variables['PP'][timestep].filled(np.nan)
-                var = np.zeros((pres_pert.shape[1], pres_pert.shape[2], pres_pert.shape[3]))
-                for i in range(pres_pert.shape[2]):
-                    for j in range(pres_pert.shape[3]):
-                        var[:, i, j] = pres_mean * 1e2 + pres_pert[0, :, i, j]
+            if not specific_names:
+                var = ds.variables[varname][timestep].filled(np.nan)
             else:
                 model_varname = processing_tools.get_modelspecific_varnames(model)[varname]
                 var = ds.variables[model_varname][timestep].filled(np.nan)
