@@ -19,9 +19,13 @@ def moisture_space_contourf(fig, ax, x_vector, y_vector, plot_field, contours, x
     
     return im
     
-def moisture_space_contour(fig, ax, x_vector, y_vector, plot_field, contours, x_lims, y_lims, x_label, y_label, color):
+def moisture_space_contour(fig, ax, x_vector, y_vector, plot_field, contours, x_lims, y_lims, x_label, y_label, color, **kwargs):
     x, h = np.meshgrid(x_vector, y_vector)
     c = ax.contour(x, h, plot_field, contours, colors=color)
+    ax.set_xlim(x_lims[0], x_lims[1])
+    ax.set_ylim(y_lims[0], y_lims[1])
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
     
     return c
     
