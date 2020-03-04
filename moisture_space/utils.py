@@ -29,6 +29,22 @@ def get_quantity_at_level(field, height, level):
     
     return target_value
 
+def get_mean_quantity_in_layer(field, height, layer_bnds):
+    """ Returns mean value of a quantity over a given altitude range.
+    
+    Parameters:
+        field (2darray): variable field with dimensions (zlevs, x)
+        height (1darray): height [m] with dimension (zlevs) 
+        layer_bnds (list of num): target level [m]
+    
+    Returns:
+        1darray, dimensions (x): mean quantity in layer     
+    """
+    height_ind = np.logical_and(height >= layer_bnds[0], height <= layer_bnds[1])
+    mean_quantity = np.mean(field[height_ind, :], axis=0)
+    
+    return mean_quantity
+
 def get_quantity_at_half_levels(field):
     """ Returns field at height levels marking the middle between 
     former height levels.
@@ -395,9 +411,26 @@ def rh_peak_height(relative_humidity, height, min_height=6e3, max_height=20e3):
     
     for p in range(num_profiles):
         rh_peak_height[p] = height[np.argmax(relative_humidity[:, p])]
-        print(np.argmax(relative_humidity[:, p]))
         rh_at_peak[p] = np.max(relative_humidity[:, p])
     
     return rh_peak_height, rh_at_peak
     
+def calc_density_moist_air(pressure, temperature, specific_humidity):
+    """ Calculate the density of moist air.
+   
+    Parameters:
+       pressure: pressure in Pa
+       temperature: temperature in K
+       specific_humidity: specific_humidity in kg/kg
+    """
+    num_profiles = pressure.shape[1]
+    density = np.ones(pressure.shape) * np.nan
+    for i in range(num_profiles):        
+        mixing_ratio = typhon.physics.specific_humidity2mixing_ratio(specific_humidity[:, i]) 
+        # virtual temperature
+        virt_temp = temperature[:, i] * (1 + 0.61 * mixing_ratio) 
+        # air density (from virtual temperature)
+        density[:, i] = typhon.physics.density(pressure[:, i], virt_temp)
+    
+    return density
     
