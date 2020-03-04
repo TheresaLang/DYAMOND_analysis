@@ -219,4 +219,23 @@ def get_cold_point_height(height, temperature):
     cold_point_height = height[np.nanargmin(temperature, axis=0)]
     
     return cold_point_height
+
+def calc_density_moist_air(pressure, temperature, specific_humidity):
+    """ Calculate the density of moist air.
+   
+    Parameters:
+       pressure: pressure in Pa
+       temperature: temperature in K
+       specific_humidity: specific_humidity in kg/kg
+    """
+    
+    mixing_ratio = typhon.physics.specific_humidity2mixing_ratio(specific_humidity) 
+    # virtual temperature
+    virt_temp = temperature * (1 + 0.61 * mixing_ratio) 
+    # air density (from virtual temperature)
+    density = typhon.physics.density(pressure, virt_temp)
+    
+    return density
+
+    
     
