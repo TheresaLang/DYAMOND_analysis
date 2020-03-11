@@ -8,7 +8,35 @@ import processing_tools
 from netCDF4 import Dataset
 from os.path import join
 from scipy.interpolate import interp1d
+from scipy.signal import detrend
 
+def eofs(series_array):
+    """ Calculate Empirical Orthogonal Functions (EOFs) as well as
+    expansion coefficients and the fraction of overall variability 
+    explained by each EOF.
+    
+    Parameters:
+        series_array (2darray): array with first dimension corresponding to
+            continuous variable (e.g. time, models)
+        num (int): number of expansion coefficients to calculate 
+            (default: 5)
+   
+    """
+    # detrend
+    array_detrended = detrend(series_array, axis=0, type='constant').T
+    # covariance matrix
+    cov_matrix = np.cov(array_detrended)
+    # Eigenvalues and -vectors
+    eigvals, EOFs = np.linalg.eig(cov_matrix)
+    # reshape
+    EOF_frac = eigvals / np.sum(eigvals)   
+    # calculate expansion coefficients corresponding to first N EOFs
+
+    expansion_coeff = np.ones((EOFs.shape[0], series_array.shape[0])) * np.nan
+    for i in range(EOFs.shape[0]):
+        expansion_coeff[i] = np.matmul(array_detrended.T, EOFs[:, i])
+        
+    return EOFs, EOF_frac, expansion_coeff
 
 def get_quantity_at_level(field, height, level):
     """ Returns value(s) at a given altitude level.
@@ -336,7 +364,6 @@ def interpolate_vertically(field, height, target_height):
         field_interp[:, p] = interp1d(height, field[:, p], fill_value='extrapolate', bounds_error=False)(target_height)
     
     return field_interp
-
 
 def tropopause_height(temperature, height, min_height=6e3, max_height=20e3):
     """ Calculate tropopause height according to WMO definition: 
