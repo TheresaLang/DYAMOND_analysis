@@ -104,7 +104,7 @@ class MoistureSpace:
 class PercMoistureSpace(MoistureSpace):
     """ Class storing mean atmospheric profiles in equally sized bins, i.e. bin statistics have
     been calculated from an equal number of profiles in each bin (percentiles). """
-    def __init__(self, name=None, profile_stats=None, levels=None, bins=None):
+    def __init__(self, name=None, profile_stats=None, bins=None, levels=None):
         """ Create instance of class PercMoistureSpace,.
         
         Parameters:
@@ -112,7 +112,7 @@ class PercMoistureSpace(MoistureSpace):
             bins (array): Bins (x-coordinate of moisture space, e.g. integrated water vapour)
             levels (array): Vertical levels (y-coordinate of moisture space, e.g. height)   
         """
-        super().__init__(name, profile_stats, levels, bins)
+        super().__init__(name, profile_stats, bins, levels)
         
     def copy(self):
         """ Create a new instance of MoistureSpace, with the same data as this instance.
@@ -166,7 +166,7 @@ class PercMoistureSpace(MoistureSpace):
 class BinMoistureSpace(MoistureSpace):
     """ Class storing mean atmospheric profiles in equally spaced bins, i.e. bin statistics have
     been calculated from different numbers of profiles in each bin."""
-    def __init__(self, name=None, profile_stats=None, levels=None, bins=None, profile_pdf=None):
+    def __init__(self, name=None, profile_stats=None, bins=None, levels=None, profile_pdf=None):
         """ Create instance of class PercMoistureSpace,.
         
         Parameters:
@@ -175,7 +175,7 @@ class BinMoistureSpace(MoistureSpace):
             levels (array): Vertical levels (y-coordinate of moisture space, e.g. height)
             profile_pdf (array): Number of profiles in each bin (same length as ``bins``)
         """
-        super().__init__(name, profile_stats, levels, bins)
+        super().__init__(name, profile_stats, bins, levels)
         self.profile_pdf = profile_pdf
         
     def copy(self):
@@ -189,7 +189,6 @@ class BinMoistureSpace(MoistureSpace):
         Parameters:
             number_threshold (int): Minimum number of profiles in a bin
         """
-        pass
         empty_bins = np.where(self.profile_pdf <= number_threshold)[0]
         self.profile_stats.remove_bins(empty_bins)
                 
@@ -223,11 +222,11 @@ class ProfileStats:
         """
         ret = cls()
         ret.variable = variable
-        ret.mean = dictionary['mean'][variable]
-        ret.median = dictionary['median'][variable]
-        ret.std = dictionary['std'][variable]
-        ret.min = dictionary['min'][variable]
-        ret.max = dictionary['max'][variable]
+        ret.mean = dictionary['mean'][variable].T
+        ret.median = dictionary['median'][variable].T
+        ret.std = dictionary['std'][variable].T
+        ret.min = dictionary['min'][variable].T
+        ret.max = dictionary['max'][variable].T
         
         return ret
     
@@ -315,11 +314,22 @@ class MoistureSpaceCollection:
     def recunstruct_from_EOFs(self, num_EOFs):
         """
         """
-        eofs = self.eofs.transpose(1, 2, 0).reshape(self.num_bins * self.num_levels, self.num_bins * self.num_levels)
+        rep = np.zeros((self.num_spaces, self.num_bins, self.num_levels))
+        r = np.zeros((self.num_spaces, self.num_bins * self.num_levels))
+        for n in range(num_EOFs):
+            r += np.real(np.matmul(
+                np.expand_dims(self.expansion_coeffs[n], 1),
+                np.expand_dims(self.eofs[n].ravel(), 0)
+            ))
+        rep = r.reshape((self.num_spaces, self.num_bins, self.num_levels))
         
-        #0: model 0
-        #rep = np.matmul(np.expand_dims(expansion_coeffs['RH'][0], 1), np.expand_dims(eofs['RH'][0].ravel(), 0))
-        #plt.imshow(np.real(rep[5].reshape(100, 50)))
+        profile_stats = [ProfileStats(variable=self.moisture_spaces[i].variable, mean=rep[i])\
+                         for i in range(self.num_spaces)]
+        ret = [PercMoistureSpace(name=i, profile_stats=profile_stats[i], bins=self.bins, levels=self.levels)\
+              for i in range(self.num_spaces)]
+            
+        return ret    
+
         
         
         
