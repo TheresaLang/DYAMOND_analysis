@@ -31,7 +31,7 @@ class MoistureSpace:
     def copy(self):
         """ Create a new instance of MoistureSpace, with the same data as this instance.
         """
-        return MoistureSpace(self.name, self.profile_stats, self.bins, self.levels)
+        return MoistureSpace(self.name, self.profile_stats.copy(), self.bins, self.levels)
     
     @property
     def mean(self):
@@ -78,11 +78,12 @@ class MoistureSpace:
         
         return layer_mean
     
-    def interpolate(self, levels):
+    def interpolate(self, levels, kind='linear'):
         """ Interpolate profile statistics vertically to given levels.
         
         Parameters:
             levels (array): Levels to interpolate on
+            kind (str): Type of interpolation (e.g. 'linear' or'cubic')
             
         Returns: 
             MoistureSpace: New instance containing interpolated fields.
@@ -95,11 +96,37 @@ class MoistureSpace:
                 field_interp = np.ones((self.num_profiles, len(levels))) * np.nan
                 for p in range(self.num_profiles):
                     field_interp[p] = interp1d(self.levels, field[p], fill_value='extrapolate',\
-                                               bounds_error=False)(levels)
+                                               bounds_error=False, kind=kind)(levels)
                 ret.profile_stats.set_attr(s, field_interp)  
         ret.levels = levels
         ret.num_levels = len(levels)
         return ret
+    
+    def select_region(self, bin_start=None, bin_end=None, lower_bnd=None, upper_bnd=None):
+        """ Select a specified region from the moisture space.
+        """ 
+        if bin_start is None:
+            bin_start = np.min(self.bins)
+        if bin_end is None:
+            bin_end = np.max(self.bins)            
+        if lower_bnd is None:
+            lower_bnd = np.min(self.levels)
+        if upper_bnd is None:
+            upper_bnd = np.max(self.levels)
+        
+        bin_ind = np.logical_and(self.bins >= bin_start, self.bins <= bin_end)
+        layer_ind = np.logical_and(self.levels >= lower_bnd, self.levels <= upper_bnd)
+        
+        for s in vars(self.profile_stats):
+            field = getattr(self.profile_stats, s)
+            if (field is not None) and (not isinstance(field, str)):
+                field_region = field[bin_ind][:, layer_ind]
+                setattr(self.profile_stats, s, field_region)
+       
+        self.bins = self.bins[bin_ind]
+        self.num_profiles = len(self.bins)
+        self.levels = self.levels[layer_ind]
+        self.num_levels = len(self.levels)
         
 class PercMoistureSpace(MoistureSpace):
     """ Class storing mean atmospheric profiles in equally sized bins, i.e. bin statistics have
@@ -117,7 +144,7 @@ class PercMoistureSpace(MoistureSpace):
     def copy(self):
         """ Create a new instance of MoistureSpace, with the same data as this instance.
         """
-        return PercMoistureSpace(self.name, self.profile_stats, self.bins, self.levels)
+        return PercMoistureSpace(self.name, self.profile_stats.copy(), self.bins, self.levels)
         
     def mean_profile(self, bin_start=None, bin_end=None):
         """ Returns the mean over several bins.
@@ -162,6 +189,19 @@ class PercMoistureSpace(MoistureSpace):
         area_mean = np.mean(layer_mean[bin_ind], axis=0)
         
         return area_mean
+    
+    def reduced_bins(self, num_bins):
+        """ Returns an array with a reduced number of bins. The number of bins
+        is reduced by combining/averaging several bins into one. 
+        
+        Parameters:
+            num_bins (int): Number of bins 
+        """
+        
+        splitted_array = np.array_split(self.profile_stats.mean, num_bins)
+        averaged_array = np.array([np.mean(a, axis=0) for a in splitted_array])
+        
+        return averaged_array
         
 class BinMoistureSpace(MoistureSpace):
     """ Class storing mean atmospheric profiles in equally spaced bins, i.e. bin statistics have
@@ -181,7 +221,7 @@ class BinMoistureSpace(MoistureSpace):
     def copy(self):
         """ Create a new instance of MoistureSpace, with the same data as this instance.
         """
-        return BinMoistureSpace(self.name, self.profile_stats, self.bins, self.levels, self.profile_pdf)
+        return BinMoistureSpace(self.name, self.profile_stats.copy(), self.bins, self.levels, self.profile_pdf)
         
     def remove_empty_bins(self, number_threshold):
         """ Remove all bins with less profiles than ``number_threshold``.
@@ -223,10 +263,14 @@ class ProfileStats:
         ret = cls()
         ret.variable = variable
         ret.mean = dictionary['mean'][variable].T
-        ret.median = dictionary['median'][variable].T
-        ret.std = dictionary['std'][variable].T
-        ret.min = dictionary['min'][variable].T
-        ret.max = dictionary['max'][variable].T
+        
+        try:
+            ret.median = dictionary['median'][variable].T
+            ret.std = dictionary['std'][variable].T
+            ret.min = dictionary['min'][variable].T
+            ret.max = dictionary['max'][variable].T
+        except:
+            pass
         
         return ret
     
@@ -260,11 +304,11 @@ class ProfileStats:
                 s_new[bin_ind] = np.nan
                 setattr(self, a, s_new)
                 
-class MoistureSpaceCollection:
-    """ Class to calculate statistics over several moisture spaces, e.g. from several models.
+class MoistureSpaceSeries:
+    """ Class to calculate statistics over several moisture spaces of the same variable.
     """
-    def __init__(self, moisture_spaces):
-        """ Create instance of class MoistureSpaceCollection.
+    def __init__(self, moisture_spaces, remove_nans=False):
+        """ Create instance of class MoistureSpaceSeries.
         
         Parameters:
             moisture_spaces (list of MoistureSpace): List of MoistureSpace instances with 
@@ -272,23 +316,45 @@ class MoistureSpaceCollection:
         """
         self.moisture_spaces = moisture_spaces
         self.num_spaces = len(moisture_spaces)
+        self.variable = moisture_spaces[0].variable
         self.bins = moisture_spaces[0].bins
         self.levels = moisture_spaces[0].levels
         self.num_bins = len(self.bins)
         self.num_levels = len(self.levels)
         
-    @property
-    def space_array(self):
-        """ Concatenate all moisture spaces (means) of this collection to one array.
-        
-        Returns:
-            3darray: Array containing all moisture spaces of this collection
-        """
+        # combine all moisture spaces of this series in one array:
         space_array = np.ones((self.num_spaces, self.num_bins, self.num_levels)) * np.nan
         for n in range(self.num_spaces):
             space_array[n] = self.moisture_spaces[n].mean
         
-        return space_array
+        if remove_nans:
+            # cut away NaNs
+            nan_ind = np.any(np.any(np.isnan(space_array), axis=0), axis=1)
+            space_array = space_array[:, ~nan_ind]
+            self.bins = self.bins[~nan_ind]
+            self.num_bins = len(self.bins)
+        self.space_array = space_array
+        
+#    @property
+#    def space_array(self):
+#        """ Concatenate all moisture spaces (means) of this collection to one array.
+#        
+#        Returns:
+#            3darray: Array containing all moisture spaces of this collection
+#        """
+#        space_array = np.ones((self.num_spaces, self.num_bins, self.num_levels)) * np.nan
+
+#        for n in range(self.num_spaces):
+#            space_array[n] = self.moisture_spaces[n].mean
+        
+#        # cut away NaNs
+#        nan_ind = np.any(np.isnan(space_array), axis=0)
+#        space_array = space_array[:, ~nan_ind]
+#        
+#        self.bins = self.bins[~nan_ind[:, 0]]
+#        self.num_bins = len(self.bins)
+#        
+#        return space_array
     
     @property
     def variability(self):
@@ -296,11 +362,39 @@ class MoistureSpaceCollection:
         """ 
         return np.std(self.space_array, axis=0)
     
+    @property
+    def mean(self):
+        """ Calculate mean of different moisture spaces.
+        """
+        return np.mean(self.space_array, axis=0)
+    
+    def reduced_bins(self, num_bins):
+        """ Returns mean of different moisture spaces with reduced number of bins.
+        
+        Parameters:
+            num_bins (int): Number of reduced bins
+        """
+        mean_array = self.mean
+        
+        splitted_array = np.array_split(mean_array, num_bins)
+        averaged_array = np.array([np.mean(a, axis=0) for a in splitted_array])
+        
+        return averaged_array
+    
+    def interpolate(self, levels):
+        """
+        """
+        moisture_spaces = []
+        for space in self.moisture_spaces:
+            space_aux = space.copy()
+            moisture_spaces.append(space_aux.interpolate(levels))
+        
+        return MoistureSpaceSeries(moisture_spaces)
+        
     def calc_EOFs(self):
         """ Calculate Empirical Orthogonal Functions (EOFs) for the collection of different 
         moisture spaces.
         """
-        reload(utils)
         reshaped_space_array = self.space_array.reshape((self.num_spaces, self.num_bins * self.num_levels))
         eofs, variability_frac, expansion_coeffs = utils.eofs(reshaped_space_array)
         eofs = eofs.reshape(self.num_bins, self.num_levels, self.num_bins * self.num_levels).transpose(2, 0, 1)
@@ -312,7 +406,10 @@ class MoistureSpaceCollection:
         return eofs, variability_frac, expansion_coeffs
     
     def recunstruct_from_EOFs(self, num_EOFs):
-        """
+        """ Reconstruct fields from a certain number of EOFs.
+        
+        Parameters:
+            num_EOFs: Number of EOFs to use to reconstruct fields.
         """
         rep = np.zeros((self.num_spaces, self.num_bins, self.num_levels))
         r = np.zeros((self.num_spaces, self.num_bins * self.num_levels))
@@ -328,7 +425,84 @@ class MoistureSpaceCollection:
         ret = [PercMoistureSpace(name=i, profile_stats=profile_stats[i], bins=self.bins, levels=self.levels)\
               for i in range(self.num_spaces)]
             
-        return ret    
+        return ret  
+
+class MoistureSpaceSeriesPair:
+    """ Class to perfomr statistics over two MoistureSpaceSeries.
+    """
+    def __init__(self, moisture_space_series_1, moisture_space_series_2):
+        """ Create instance of class MoistureSpaceSeriesPair.
+        
+        Parameters:
+            moisture_space_series_1: First MoistureSpaceSeries
+            moisture_space_series_2: Second MoistureSpaceSeries
+        """
+        self.moisture_space_series = [moisture_space_series_1, moisture_space_series_2]
+        self.variables = [moisture_space_series_1.variable, moisture_space_series_2.variable]
+        self.bins = moisture_space_series_1.bins
+        self.num_bins = moisture_space_series_1.num_bins
+        self.levels = moisture_space_series_1.levels
+        self.num_levels = moisture_space_series_1.num_levels
+        
+    def perform_SVD(self):
+        """ Perform a Singular Value Decomposition (SVD).
+        """
+        reload(utils)
+        space_arrays = [self.moisture_space_series[i].space_array for i in range(2)]
+        reshaped_space_arrays = [
+            space_arrays[i].reshape(
+                (self.moisture_space_series[i].num_spaces, self.num_bins * self.num_levels)
+            ) 
+            for i in range(2)
+        ]
+        
+        u, s, v, expansion_coeffs_1, expansion_coeffs_2 = utils.svd(reshaped_space_arrays)
+        singular_vec1 = u.reshape((self.num_bins, self.num_levels, self.num_bins * self.num_levels)).transpose(2, 0, 1)
+        singular_vec2 = v.reshape((self.num_bins * self.num_levels, self.num_bins, self.num_levels))
+        frac_variability = np.array([i / np.sum(s) for i in s])
+        
+        return singular_vec1, singular_vec2, frac_variability, expansion_coeffs_1, expansion_coeffs_2
+        
+class MoistureSpaceSeriesCollection():
+    """ Class to perfomr statistics over several (two or more) MoistureSpaceSeries.
+    """
+    def __init__(self, moisture_space_series_list):
+        """ Create instance of class MoistureSpaceSeriesCollection.
+        
+        Parameters:
+            moisture_space_series_list: List containing MoistureSpaceSeries objects
+        """
+        self.moisture_space_series = [series for series in moisture_space_series_list]
+        self.num_series = len(self.moisture_space_series)
+        self.variables = [series.variable for series in moisture_space_series_list]
+        self.bins = self.moisture_space_series[0].bins
+        self.num_bins = self.moisture_space_series[0].num_bins
+        self.levels = self.moisture_space_series[0].levels
+        self.num_levels = self.moisture_space_series[0].num_levels
+        self.num_spaces = self.moisture_space_series[0].num_spaces
+        
+    def calc_EOFs(self):
+        """ Calculate EOFs explaining co-variability of variables in different MoistureSpaceSeries.
+        """
+        reshaped_space_array = np.concatenate([series.space_array.reshape((series.num_spaces, series.num_bins * series.num_levels)) for series in self.moisture_space_series], axis=1)
+            
+        eofs_combined, variability_frac, expansion_coeffs_combined = utils.eofs(reshaped_space_array)
+        eofs_split = np.split(eofs_combined, self.num_series, axis=0)
+
+        eofs = [np.reshape(eof, (self.num_bins, self.num_levels, self.num_bins * self.num_levels * self.num_series)).transpose(2, 0, 1) for eof in eofs_split]
+        
+        expansion_coeffs_split = np.split(expansion_coeffs_combined, self.num_series, axis=0)
+                
+        self.eofs = eofs
+        self.variability_frac = variability_frac
+        self.expansion_coeffs = expansion_coeffs_combined
+        
+        return eofs, variability_frac, expansion_coeffs_split
+        
+        
+        
+        
+        
 
         
         
