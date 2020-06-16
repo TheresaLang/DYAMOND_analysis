@@ -38,6 +38,19 @@ def eofs(series_array):
         
     return EOFs, EOF_frac, expansion_coeff
 
+def svd(series_arrays):
+    """ Perform a singular value decomposition.
+    """
+    arrays_detrended = [((series_arrays[i] - np.mean(series_arrays[i], axis=0)) ) for i in range(2)]#/ np.std(series_arrays[i], axis=0)
+    cov_matrix = np.matmul(arrays_detrended[0].T, arrays_detrended[1])
+    
+    u, s, vh = np.linalg.svd(cov_matrix)
+
+    expansion_coeff_1 = np.matmul(arrays_detrended[0], u)
+    expansion_coeff_2 = np.matmul(arrays_detrended[1], vh.T)
+    
+    return u, s, vh, expansion_coeff_1, expansion_coeff_2
+
 def get_quantity_at_level(field, height, level):
     """ Returns value(s) at a given altitude level.
     
@@ -124,6 +137,33 @@ def calc_vertical_mean(field, height):
     / np.sum(np.expand_dims(layer_depth, 1))
     return weighted_average
 
+def calc_IWV_above(specific_humidity, temperature, pressure, height):
+    """ Calculate IWV above each level.
+    
+    Parameters:
+        specific_humidity (2darray): specific humidity [kg/kg]
+        temperature (2darray): temperature [K]
+        pressure (2darray): pressure [Pa]
+        height (1darray): height [m]
+        
+    Returns:
+        2darray, dimensions (levs, x): UTH [-]
+    """
+    array_shape = temperature.shape 
+
+    if height[0] > height[-1]:
+        height = np.flip(height, axis=0)
+        specific_humidity = np.flip(specific_humidity, axis=0) 
+        temperature = np.flip(temperature, axis=0)
+        pressure = np.flip(pressure, axis=0)
+        
+    iwv_above = np.zeros(specific_humidity.shape)    
+    for lev in range(specific_humidity.shape[0]):
+        iwv_above[lev] = calc_IWV(specific_humidity[lev:], temperature[lev:], pressure[lev:], height[lev:])
+    
+    return iwv_above
+    
+
 def calc_UTH(relative_humidity, specific_humidity, temperature, pressure, height, thres_upper_bnd = 0.018, thres_lower_bnd=1.2):
     """ Calculate upper tropospheric humidity.
     
@@ -150,7 +190,6 @@ def calc_UTH(relative_humidity, specific_humidity, temperature, pressure, height
         
     iwv_above = np.zeros(specific_humidity.shape)    
     for lev in range(specific_humidity.shape[0]):
-        print(lev)
         iwv_above[lev] = calc_IWV(specific_humidity[lev:], temperature[lev:], pressure[lev:], height[lev:])
     
     #print(iwv_above)
@@ -243,7 +282,7 @@ def calc_UTH_boundaries(relative_humidity, specific_humidity, temperature, press
     
     return lower_boundary, upper_boundary
 
-def calc_IWV(specific_humidity, temperature, pressure, height):
+def calc_IWV(specific_humidity, temperature, pressure, height, height_start=0, height_end=20000):
     """ Calculate integrated water vapor (IWV).
     
     Parameters:
@@ -255,6 +294,7 @@ def calc_IWV(specific_humidity, temperature, pressure, height):
     Returns: 
         1darray, dimensions (x): integrated water vapor [kg m**-2]
     """
+
     # get shape of input arrays
     array_shape = temperature.shape    
     # generate height array
@@ -271,9 +311,11 @@ def calc_IWV(specific_humidity, temperature, pressure, height):
     if height[0] > height[-1]:
         height = np.flip(height, axis=0)
         vmr = np.flip(vmr, axis=0)
-        rho = np.flip(rho, axis=0)    
+        rho = np.flip(rho, axis=0)   
+    # heights to integrate over
+    height_ind = np.logical_and(height >= height_start, height <= height_end)
     # integrate vertically
-    iwv = np.trapz(vmr * rho, height, axis=0)
+    iwv = np.trapz(vmr[height_ind] * rho[height_ind], height[height_ind], axis=0)
     
     return iwv
 
@@ -313,6 +355,20 @@ def calc_IWP(ice_mass_mixing_ratio, temperature, pressure, specific_humidity, he
     ice_water_path = np.trapz(ice_mass_mixing_ratio * density, h, axis=0)
     return ice_water_path
 
+def calc_dewpoint(e):
+    """ Calculate the dew point temperature from the water vapor pressure e.
+    
+    Parameters:
+        e (2darray): Water vapor pressure [Pa]
+        
+    Returns:
+        2darray: Dew point temperature [K]
+    """
+    
+    t_d = 243.5 * np.log(e / 611.2) / (17.67 - np.log(e / 611.2)) + 273.15
+    
+    return t_d
+    
 def spec_hum2rel_hum(specific_humidity, temperature, pressure, phase='mixed'):
     """ Calculate relative humidity from specific humidity. 
     
@@ -344,6 +400,22 @@ def spec_hum2rel_hum(specific_humidity, temperature, pressure, phase='mixed'):
     rh = vmr * pressure / e_eq
     
     return rh
+
+def rel_hum2spec_hum(relative_humidity, temperature, pressure, phase='mixed'):
+    """ Calculate the specific humidity from a given relative humidity.
+    """
+    if phase == 'mixed':
+        e_eq = typhon.physics.e_eq_mixed_mk(temperature)
+    elif phase == 'water':
+        e_eq = typhon.physics.e_eq_water_mk(temperature)
+    elif phase == 'ice':
+        e_eq = typhon.physics.e_eq_ice_mk(temperature)
+        
+    vmr = relative_humidity * e_eq / pressure
+    specific_humidity = typhon.physics.vmr2specific_humidity(vmr)
+    
+    return specific_humidity
+    
 
 def interpolate_vertically(field, height, target_height):
     """ Interpolate a filed to a new height vector. 
@@ -411,6 +483,17 @@ def tropopause_height(temperature, height, min_height=6e3, max_height=20e3):
                
     return tropo_height
 
+def cold_point_tropopause(temperature, height, min_height=6e3, max_height=20e3):
+    """ Calculate the cold point tropopause height and tempertaure.
+    """
+    ind_pos_height = np.logical_and(height > min_height, height < max_height)
+    
+    ind_tropo = np.argmin(temperature[:, ind_pos_height], axis=1)
+    tropo_temp = temperature[:, ind_pos_height][:, ind_tropo]
+    tropo_height = height[ind_pos_height][ind_tropo]
+    
+    return tropo_height, tropo_temp
+
 def rh_peak_height(relative_humidity, height, min_height=6e3, max_height=20e3):
     """ Returns the height at which the relative humidity is at its maximum (between min_height
     and max_height).
@@ -450,14 +533,72 @@ def calc_density_moist_air(pressure, temperature, specific_humidity):
        temperature: temperature in K
        specific_humidity: specific_humidity in kg/kg
     """
-    num_profiles = pressure.shape[1]
+    num_profiles = pressure.shape[0]
     density = np.ones(pressure.shape) * np.nan
     for i in range(num_profiles):        
-        mixing_ratio = typhon.physics.specific_humidity2mixing_ratio(specific_humidity[:, i]) 
+        mixing_ratio = typhon.physics.specific_humidity2mixing_ratio(specific_humidity[i]) 
         # virtual temperature
-        virt_temp = temperature[:, i] * (1 + 0.61 * mixing_ratio) 
+        virt_temp = temperature[i] * (1 + 0.61 * mixing_ratio) 
         # air density (from virtual temperature)
-        density[:, i] = typhon.physics.density(pressure[:, i], virt_temp)
+        density[i] = typhon.physics.density(pressure[i], virt_temp)
     
     return density
+
+
+def calc_integrated_velocity(vertical_velocity, height, h_start, h_end, temperature, pressure, specific_humidity):
+    """ Calculate vertically integrated mass weighted velocity.
+    """
+    num_profiles = vertical_velocity.shape[0]
+    h_ind = np.logical_and(height > h_start, height < h_end)
+    dh = np.gradient(height)
+    density = calc_density_moist_air(pressure, temperature, specific_humidity)
     
+    integrated_velocity = np.ones(vertical_velocity.shape[0])
+    for i in range(num_profiles):
+        integrated_velocity[i] = np.trapz(vertical_velocity[i][h_ind] * density[i][h_ind], x=height[h_ind]) / (height[h_ind][-1] - height[h_ind][0])
+    
+    return integrated_velocity
+
+def calc_pot_temp(temperature, pressure, p0=100000):
+    """ Calculate potential temperature.
+    """
+    Rd = typhon.constants.gas_constant_dry_air
+    cpd = typhon.constants.isobaric_mass_heat_capacity
+    k = Rd / cpd
+    
+    pot_temp = temperature * (p0 / pressure) ** k
+    
+    return pot_temp
+    
+def calc_equivalent_pot_temp(temperature, pressure, specific_humidity):
+    """ Calculate equivalent potential temperature.
+    """
+    Rd = typhon.constants.gas_constant_dry_air
+    cpd = typhon.constants.isobaric_mass_heat_capacity
+    Rv = typhon.constants.gas_constant_water_vapor
+    Lv = typhon.constants.heat_of_vaporization
+
+    mixing_ratio = typhon.physics.specific_humidity2mixing_ratio(specific_humidity)
+    relative_humidity = spec_hum2rel_hum(specific_humidity, temperature, pressure, phase='mixed')
+    pot_temp = calc_pot_temp(temperature, pressure)
+    
+    equivalent_pot_temp = pot_temp * relative_humidity ** (-mixing_ratio * Rv / cpd) * np.exp(Lv * mixing_ratio / cpd / temperature)
+    
+    return equivalent_pot_temp
+
+def calc_sat_equivalent_pot_temp(temperature, pressure):
+    """ Calc saturation value of equivalent potential temperature.
+    """
+    
+    Rd = typhon.constants.gas_constant_dry_air
+    cpd = typhon.constants.isobaric_mass_heat_capacity
+    Lv = typhon.constants.heat_of_vaporization
+    
+    e_eq = typhon.physics.e_eq_mixed_mk(temperature)
+    vmr = e_eq / pressure
+    sat_mixing_ratio = typhon.physics.vmr2mixing_ratio(vmr)
+    pot_temp = calc_pot_temp(temperature, pressure)
+    
+    sat_equivalent_pot_temp = pot_temp * np.exp(Lv * sat_mixing_ratio / cpd / temperature)
+   
+    return sat_equivalent_pot_temp
