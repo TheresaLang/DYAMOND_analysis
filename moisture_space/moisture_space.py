@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from importlib import reload
+from scipy.stats import pearsonr
 
 class MoistureSpace:
     """ Class storing atmospheric profiles in moisture space. """
@@ -27,7 +28,16 @@ class MoistureSpace:
         
         if self.profile_stats.mean.shape[0] != self.num_profiles:
             self.profile_stats.transpose()
-            
+    
+    @classmethod
+    def from_mean(cls, mean, variable, name=None, bins=None, levels=None):
+        """ Create MoistureSpace from only a mean field.
+        """
+        profile_stats = ProfileStats(variable=variable, mean=mean.T)
+        ret = cls(name, profile_stats, bins, levels)
+        
+        return ret
+        
     def copy(self):
         """ Create a new instance of MoistureSpace, with the same data as this instance.
         """
@@ -443,6 +453,19 @@ class MoistureSpaceSeriesPair:
         self.num_bins = moisture_space_series_1.num_bins
         self.levels = moisture_space_series_1.levels
         self.num_levels = moisture_space_series_1.num_levels
+        
+    def correlation(self):
+        """ Calculate correlation coefficient for each point in moisture space.
+        """
+        corr_coeff = np.zeros((self.num_bins, self.num_levels))
+        space_array_0 = self.moisture_space_series[0].space_array
+        space_array_1 = self.moisture_space_series[1].space_array
+        
+        for b in range(self.num_bins):
+            for l in range(self.num_levels):
+                corr_coeff[b, l], p = pearsonr(space_array_0[:, b, l], space_array_1[:, b, l])
+        
+        return corr_coeff        
         
     def perform_SVD(self):
         """ Perform a Singular Value Decomposition (SVD).
