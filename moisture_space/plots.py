@@ -105,6 +105,24 @@ def DYAMOND_colors(experiment):
     
     return colors[experiment]
 
+def DYAMOND_ls(experiment):
+    ls = {
+        'ICON-2.5km': '-',
+        'ICON-5.0km_1': '-',
+        'NICAM-3.5km': '-',
+        'SAM-4.0km': '-',
+        'UM-5.0km': '-',
+        'FV3-3.25km': '-',
+        'GEOS-3.0km': '--',
+        'IFS-4.0km': '-',
+        'IFS-9.0km': '--',
+        'MPAS-3.75km': '--',
+        'ARPEGE-2.5km': '-',
+        'ERA5-31.0km': '-'
+    }
+    
+    return ls[experiment]
+
 def axis_labels(variable):
     axis_labels = {
         'TEMP': 'Temperature / K',
