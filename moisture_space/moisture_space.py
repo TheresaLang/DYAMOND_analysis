@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from importlib import reload
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr
 
 class MoistureSpace:
     """ Class storing atmospheric profiles in moisture space. """
@@ -20,14 +20,21 @@ class MoistureSpace:
         self.variable = profile_stats.variable
         self.levels = levels
         self.bins = bins
+        self.num_profiles = len(self.bins)
+        
+        
+        if self.profile_stats.mean.shape[0] != self.num_profiles:
+            self.profile_stats.transpose()
+            
         if levels is None:
             self.num_levels = 1
         else:
             self.num_levels = len(self.levels)
-        self.num_profiles = len(self.bins)
         
-        if self.profile_stats.mean.shape[0] != self.num_profiles:
-            self.profile_stats.transpose()
+    def copy(self):
+        """ Create a new instance of MoistureSpace, with the same data as this instance.
+        """
+        return MoistureSpace(self.name, self.profile_stats.copy(), self.bins, self.levels)
     
     @classmethod
     def from_mean(cls, mean, variable, name=None, bins=None, levels=None):
@@ -37,11 +44,6 @@ class MoistureSpace:
         ret = cls(name, profile_stats, bins, levels)
         
         return ret
-        
-    def copy(self):
-        """ Create a new instance of MoistureSpace, with the same data as this instance.
-        """
-        return MoistureSpace(self.name, self.profile_stats.copy(), self.bins, self.levels)
     
     @property
     def mean(self):
@@ -92,7 +94,7 @@ class MoistureSpace:
         """ Interpolate profile statistics vertically to given levels.
         
         Parameters:
-            levels (array): Levels to interpolate on
+            levels (1darray): Levels to interpolate on
             kind (str): Type of interpolation (e.g. 'linear' or'cubic')
             
         Returns: 
@@ -103,13 +105,37 @@ class MoistureSpace:
         for s in vars(self.profile_stats):
             field = getattr(self.profile_stats, s)
             if (field is not None) and (not isinstance(field, str)):
-                field_interp = np.ones((self.num_profiles, len(levels))) * np.nan
+                field_interp = np.empty((self.num_profiles, len(levels)))
                 for p in range(self.num_profiles):
                     field_interp[p] = interp1d(self.levels, field[p], fill_value='extrapolate',\
                                                bounds_error=False, kind=kind)(levels)
                 ret.profile_stats.set_attr(s, field_interp)  
         ret.levels = levels
         ret.num_levels = len(levels)
+        return ret
+    
+    def change_levels(self, new_levels, new_levels_interp, kind='linear'):
+        """ Interpolate profile statistics to new levels of a different variable (e.g. pressure, temperature)
+        
+        Parameters:
+            new_levels (2darray): Variable for new levels at old levels
+            new_levels_interp (1darray): New levels to interpolate on
+            kind (str): Type of interpolation (e.g. 'linear' or'cubic')
+        """
+        ret = self.copy()
+        
+        for s in vars(self.profile_stats):
+            field = getattr(self.profile_stats, s)
+            if (field is not None) and (not isinstance(field, str)):
+                field_interp = np.empty((self.num_profiles, len(new_levels_interp)))
+                for p in range(self.num_profiles):
+                    field_interp[p] = interp1d(np.log(new_levels[p]), field[p], fill_value='extrapolate',\
+                                               bounds_error=False, kind=kind)(np.log(new_levels_interp))
+                ret.profile_stats.set_attr(s, field_interp)
+        
+        ret.levels = new_levels_interp
+        ret.num_levels = len(ret.levels)
+        
         return ret
     
     def select_region(self, bin_start=None, bin_end=None, lower_bnd=None, upper_bnd=None):
@@ -138,6 +164,17 @@ class MoistureSpace:
         self.levels = self.levels[layer_ind]
         self.num_levels = len(self.levels)
         
+    def remove_levels(self, level_ind):
+        """ Remove levels with indices specified in level_ind.
+        
+        Parameters:
+            level_ind (array): indices of levels to remove
+        """
+        remaining_levels = [i for i in range(self.num_levels) if i not in level_ind]
+        self.levels = self.levels[remaining_levels]
+        self.num_levels = len(self.levels)
+        self.profile_stats.remove_levels(level_ind)
+        
 class PercMoistureSpace(MoistureSpace):
     """ Class storing mean atmospheric profiles in equally sized bins, i.e. bin statistics have
     been calculated from an equal number of profiles in each bin (percentiles). """
@@ -150,6 +187,14 @@ class PercMoistureSpace(MoistureSpace):
             levels (array): Vertical levels (y-coordinate of moisture space, e.g. height)   
         """
         super().__init__(name, profile_stats, bins, levels)
+        
+        # remove levels with nans
+        if self.levels is not None:
+            nan_levels = np.where(np.all(np.isnan(self.profile_stats.mean), axis=0))[0]
+            if len(nan_levels) > 0:
+                remaining_levels = [i for i in range(len(self.levels)) if i not in nan_levels]
+                self.levels = self.levels[remaining_levels]
+                self.profile_stats.remove_levels(nan_levels)
         
     def copy(self):
         """ Create a new instance of MoistureSpace, with the same data as this instance.
@@ -212,6 +257,21 @@ class PercMoistureSpace(MoistureSpace):
         averaged_array = np.array([np.mean(a, axis=0) for a in splitted_array])
         
         return averaged_array
+    
+    def complete_to_TOA(self, aux_levels, aux_profile):
+        """ Complete profiles to the top of the atmosphere using a given atmospheric profile (e.g. standard profile). A cubic interpolation is used for the transition.
+        
+        Parameters: 
+            aux_levels:
+            aux_profiles:
+        """
+        
+        levels_new = np.hstack((self.levels, aux_levels))
+        aux_profiles = np.repeat(np.expand_dims(aux_profile, 0), self.num_profiles, axis=0)
+        mean_new = np.hstack((self.profile_stats.mean, aux_profiles))
+        
+        ret = PercMoistureSpace.from_mean(mean_new, self.variable, self.name, self.bins, levels_new)
+        return ret
         
 class BinMoistureSpace(MoistureSpace):
     """ Class storing mean atmospheric profiles in equally spaced bins, i.e. bin statistics have
@@ -300,6 +360,28 @@ class ProfileStats:
             s = getattr(self, a)
             if (s is not None) and (not isinstance(s, str)):
                 setattr(self, a, s.T)
+                
+    def flip(self):
+        """ Flip all attributes that are ndarrays
+        """
+        
+        for a in vars(self):
+            s = getattr(self, a)
+            if (s is not None) and (not isinstance(s, str)):
+                setattr(self, a, np.flipud(s))
+                
+    def remove_levels(self, level_ind):
+        """ Remove statistics of specified levels.
+        
+        Parameters:
+            level_ind (array or list): Indices of levels to remove
+        """
+        for a in vars(self):
+            s = getattr(self, a)
+            if (s is not None) and (not isinstance(s, str)):
+                s_new = s.copy()
+                s_new = np.delete(s_new, level_ind, axis=1)
+                setattr(self, a, s_new)
                 
     def remove_bins(self, bin_ind):
         """ Set statistics of specified bins to NaN.
@@ -454,7 +536,7 @@ class MoistureSpaceSeriesPair:
         self.levels = moisture_space_series_1.levels
         self.num_levels = moisture_space_series_1.num_levels
         
-    def correlation(self):
+    def correlation(self, corrtype='pearson'):
         """ Calculate correlation coefficient for each point in moisture space.
         """
         corr_coeff = np.zeros((self.num_bins, self.num_levels))
@@ -463,7 +545,10 @@ class MoistureSpaceSeriesPair:
         
         for b in range(self.num_bins):
             for l in range(self.num_levels):
-                corr_coeff[b, l], p = pearsonr(space_array_0[:, b, l], space_array_1[:, b, l])
+                if corrtype == 'pearson':
+                    corr_coeff[b, l], p = pearsonr(space_array_0[:, b, l], space_array_1[:, b, l])
+                elif corrtype == 'spearman':
+                    corr_coeff[b, l], p = spearmanr(space_array_0[:, b, l], space_array_1[:, b, l])
         
         return corr_coeff        
         
