@@ -368,6 +368,19 @@ def calc_dewpoint(e):
     t_d = 243.5 * np.log(e / 611.2) / (17.67 - np.log(e / 611.2)) + 273.15
     
     return t_d
+
+def drh_dt(temperature, pressure, relative_humidity, vertical_velocity):
+    """
+    """
+    L = typhon.constants.heat_of_vaporization
+    R = typhon.constants.gas_constant_water_vapor
+    g = typhon.constants.g
+    cp = typhon.constants.isobaric_mass_heat_capacity
+    density = pressure / R / temperature
+    Gamma = -g / cp
+    drh_dt = (relative_humidity / pressure * -density * g - relative_humidity * L / R / temperature ** 2 * Gamma) * vertical_velocity
+    
+    return drh_dt
     
 def spec_hum2rel_hum(specific_humidity, temperature, pressure, phase='mixed'):
     """ Calculate relative humidity from specific humidity. 
