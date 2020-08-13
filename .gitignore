@@ -2,7 +2,6 @@ __pycache__
 *.nc
 *.pdf
 *.png
-*.ipynb
 .ipynb_checkpoints
 Plots*
 Untitled*
