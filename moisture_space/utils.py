@@ -4,7 +4,6 @@
 
 import numpy as np
 import typhon
-import processing_tools
 from netCDF4 import Dataset
 from os.path import join
 from scipy.interpolate import interp1d
@@ -92,7 +91,6 @@ def get_quantity_at_half_levels(field):
     
     Parameters:
         field (2darray): variable field with dimensions (zlevs, x)
-
     Returns:
         2darray, dimensions (zhalflevs, x): field at half levels
     """
