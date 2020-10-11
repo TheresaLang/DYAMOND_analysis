@@ -90,12 +90,13 @@ class MoistureSpace:
         
         return layer_mean
     
-    def interpolate(self, levels, kind='linear'):
+    def interpolate(self, levels, kind='linear', interp_space='linear'):
         """ Interpolate profile statistics vertically to given levels.
         
         Parameters:
             levels (1darray): Levels to interpolate on
             kind (str): Type of interpolation (e.g. 'linear' or'cubic')
+            interp_space (st): If 'log', interpolation is performed in log space
             
         Returns: 
             MoistureSpace: New instance containing interpolated fields.
@@ -107,7 +108,11 @@ class MoistureSpace:
             if (field is not None) and (not isinstance(field, str)):
                 field_interp = np.empty((self.num_profiles, len(levels)))
                 for p in range(self.num_profiles):
-                    field_interp[p] = interp1d(self.levels, field[p], fill_value='extrapolate',\
+                    if interp_space == 'log':
+                        field_interp[p] = np.exp(interp1d(self.levels, np.log(field[p]), fill_value=np.nan,\
+                                               bounds_error=False, kind=kind)(levels))
+                    else:
+                        field_interp[p] = interp1d(self.levels, field[p], fill_value=np.nan,\
                                                bounds_error=False, kind=kind)(levels)
                 ret.profile_stats.set_attr(s, field_interp)  
         ret.levels = levels
