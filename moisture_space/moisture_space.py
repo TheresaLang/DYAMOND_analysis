@@ -465,6 +465,19 @@ class MoistureSpaceSeries:
         """
         return np.mean(self.space_array, axis=0)
     
+    def mean_profile(self, bin_start=None, bin_end=None):
+        """ Calculate mean profile over all moisture spaces.
+        """
+        if bin_start is None:
+            bin_start = np.min(self.bins)
+        if bin_end is None:
+            bin_end = np.max(self.bins)
+        
+        bin_ind = np.logical_and(self.bins >= bin_start, self.bins <= bin_end)
+        bin_mean = np.mean(self.mean[bin_ind], axis=0)
+        
+        return bin_mean
+    
     def reduced_bins(self, num_bins):
         """ Returns mean of different moisture spaces with reduced number of bins.
         
