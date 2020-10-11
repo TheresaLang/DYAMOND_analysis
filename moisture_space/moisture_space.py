@@ -558,17 +558,18 @@ class MoistureSpaceSeriesPair:
         """ Calculate correlation coefficient for each point in moisture space.
         """
         corr_coeff = np.zeros((self.num_bins, self.num_levels))
+        p_val = np.zeros((self.num_bins, self.num_levels))
         space_array_0 = self.moisture_space_series[0].space_array
         space_array_1 = self.moisture_space_series[1].space_array
         
         for b in range(self.num_bins):
             for l in range(self.num_levels):
                 if corrtype == 'pearson':
-                    corr_coeff[b, l], p = pearsonr(space_array_0[:, b, l], space_array_1[:, b, l])
+                    corr_coeff[b, l], p_val[b, l] = pearsonr(space_array_0[:, b, l], space_array_1[:, b, l])
                 elif corrtype == 'spearman':
-                    corr_coeff[b, l], p = spearmanr(space_array_0[:, b, l], space_array_1[:, b, l])
+                    corr_coeff[b, l], p_val[b, l] = spearmanr(space_array_0[:, b, l], space_array_1[:, b, l])
         
-        return corr_coeff        
+        return corr_coeff, p_val        
         
     def perform_SVD(self):
         """ Perform a Singular Value Decomposition (SVD).
