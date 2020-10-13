@@ -125,14 +125,14 @@ def DYAMOND_ls(experiment):
 
 def axis_labels(variable):
     axis_labels = {
-        'TEMP': 'Temperature / K',
-        'PRES': 'Pressure / hPa',
-        'QI': 'Cloud ice content / mg kg$^{-1}$',
-        'QI_vol': 'Cloud ice content / mg m$^{-3}$',
-        'QC': 'Cloud water content / mg kg$^{-1}$',
-        'QV': 'Specific humidity / g kg$^{-1}$',
-        'RH': 'Relative humidity / %',
-        'W': 'Vertical velocity m s$^{-1}$',
+        'TEMP': '$T$ / K',
+        'PRES': '$P$ / hPa',
+        'QI': '$q_\mathrm{i}$ / mg kg$^{-1}$',
+        'QI_vol': '$q_\mathrm{i}$ / mg m$^{-3}$',
+        'QC': '$q_\mathrm{l}$ / mg kg$^{-1}$',
+        'QV': '$q$ / g kg$^{-1}$',
+        'RH': 'RH / %',
+        'W': '$w$ / m s$^{-1}$',
         'OLR': 'OLR / W m$^-2$',
         'STOA': 'Net SW TOA / W m$^-2$',
         'H_tropo': 'Tropopause_height / km',
