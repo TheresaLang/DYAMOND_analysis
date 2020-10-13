@@ -1,4 +1,5 @@
 import utils
+import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
@@ -44,6 +45,52 @@ class MoistureSpace:
         ret = cls(name, profile_stats, bins, levels)
         
         return ret
+    
+    @classmethod
+    def from_netcdf(cls, filename, name=None):
+        """ Create MoistureSpace object from a netCDF file.
+        
+        Parameters:
+            filename (str): Full path to input file
+        """
+        ds = xr.load_dataset(filename)
+        stats_dict = {s: ds[s].data for s in list(ds.keys())}
+        profile_stats = ProfileStats.from_dict(stats_dict)
+        bins = ds.coords['bins'].data
+        levels = ds.coords['levels'].data
+        inst = cls(name, profile_stats, bins, levels)
+        
+        return inst
+        
+    def to_netcdf(self, filename):
+        """ Save moisture space to a netCDF file.
+        
+        Parameters:
+            filename (str): Full path to input file
+        """
+        data_vars = {}
+        coords = {}
+        
+        if self.num_levels == 1:
+            dimensions = ['bins']
+        else:
+            dimensions = ['bins', 'levels']
+        
+        for s in vars(self.profile_stats):
+            field = getattr(self.profile_stats, s)
+            if (field is not None) and (not isinstance(field, str)):
+                data_vars[s] = (dimensions, field)
+        
+        coords = {
+            'bins': (['bins'], self.bins),
+            'levels': (['levels'], self.levels)
+        }
+        
+        ds = xr.Dataset(
+            data_vars,
+            coords = coords
+        )
+        ds.to_netcdf(filename)
     
     @property
     def mean(self):
