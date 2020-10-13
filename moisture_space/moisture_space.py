@@ -380,7 +380,6 @@ class ProfileStats:
         
         Parameters:
             dictionary (dict): Nested dictionary with keys corresponding to statistics and variables
-            variable (str): Variable name
         """
         ret = cls()
         
