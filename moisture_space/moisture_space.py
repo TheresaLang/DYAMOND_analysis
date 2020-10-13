@@ -375,7 +375,7 @@ class ProfileStats:
         self.max = maximum
         
     @classmethod
-    def from_dict(cls, dictionary, variable):
+    def from_dict(cls, dictionary):
         """ Create instance of class ProfileStats from a dictionary.
         
         Parameters:
@@ -383,16 +383,9 @@ class ProfileStats:
             variable (str): Variable name
         """
         ret = cls()
-        ret.variable = variable
-        ret.mean = dictionary['mean'][variable].T
         
-        try:
-            ret.median = dictionary['median'][variable].T
-            ret.std = dictionary['std'][variable].T
-            ret.min = dictionary['min'][variable].T
-            ret.max = dictionary['max'][variable].T
-        except:
-            pass
+        for attr, value in dictionary.items():
+            ret.set_attr(attr, value)
         
         return ret
     
